@@ -5,7 +5,8 @@ import subprocess
 import sys
 from importlib.metadata import version as get_version
 
-import click
+import asyncclick as click
+from asyncclick import pass_context
 from dotenv import load_dotenv
 
 from cli.command_group import cli
@@ -20,9 +21,10 @@ from cli.utils.timer import timer
 
 
 @cli.command()
-@click.pass_obj
-def health(client):
+@pass_context
+def health(ctx):
     """Check the health of the server."""
+    client = ctx.obj
     with timer():
         response = client.health()
 
@@ -30,8 +32,9 @@ def health(client):
 
 
 @cli.command()
-@click.pass_obj
-def server_stats(client):
+@pass_context
+def server_stats(ctx):
+    client = ctx.obj
     """Check the server stats."""
     with timer():
         response = client.server_stats()
@@ -47,9 +50,10 @@ def server_stats(client):
     "--limit", default=None, help="Pagination limit. Defaults to 100."
 )
 @click.option("--run-type-filter", help="Filter for log types")
-@click.pass_obj
-def logs(client, run_type_filter, offset, limit):
+@pass_context
+def logs(ctx, run_type_filter, offset, limit):
     """Retrieve logs with optional type filter."""
+    client = ctx.obj
     with timer():
         response = client.logs(
             offset=offset, limit=limit, run_type_filter=run_type_filter
@@ -219,7 +223,7 @@ def generate_report():
     default="prod",
     help="Which dev environment to pull the image from?",
 )
-def serve(
+async def serve(
     host,
     port,
     docker,
@@ -233,7 +237,7 @@ def serve(
     config_path,
     build,
     dev,
-    image_env
+    image_env,
 ):
     """Start the R2R server."""
     load_dotenv()
@@ -241,18 +245,15 @@ def serve(
         click.echo(
             "WARNING: Both `image` and `image_env` were provided. Using `image`."
         )
-
-    if not image:
+    if not image and docker:
         r2r_version = get_version("r2r")
 
-        version_specific_image = (
-            f"ragtoriches/{image_env}:{r2r_version}"
-        )
+        version_specific_image = f"ragtoriches/{image_env}:{r2r_version}"
         latest_image = f"ragtoriches/{image_env}:latest"
 
         def image_exists(img):
             try:
-                result = subprocess.run(
+                subprocess.run(
                     ["docker", "manifest", "inspect", img],
                     check=True,
                     capture_output=True,
@@ -266,14 +267,21 @@ def serve(
             click.echo(f"Using image: {version_specific_image}")
             image = version_specific_image
         elif image_exists(latest_image):
-            click.echo(f"Version-specific image not found. Using latest: {latest_image}")
+            click.echo(
+                f"Version-specific image not found. Using latest: {latest_image}"
+            )
             image = latest_image
         else:
-            click.echo(f"Neither {version_specific_image} nor {latest_image} found locally.")
-            click.echo("Please pull the required image or build it using the --build flag.")
+            click.echo(
+                f"Neither {version_specific_image} nor {latest_image} found in remote registry. Confirm the sanity of your output for `docker manifest inspect ragtoriches/{version_specific_image}` and  `docker manifest inspect ragtoriches/{latest_image}`."
+            )
+            click.echo(
+                "Please pull the required image or build it using the --build flag."
+            )
             raise click.Abort()
 
-    os.environ["R2R_IMAGE"] = image
+    if docker:
+        os.environ["R2R_IMAGE"] = image
 
     if build:
         subprocess.run(
@@ -289,6 +297,19 @@ def serve(
             check=True,
         )
 
+        subprocess.run(
+            [
+                "docker",
+                "build",
+                "-t",
+                "unstructured-docker",
+                "-f",
+                "Dockerfile.unstructured",
+                ".",
+            ],
+            check=True,
+        )
+
     if config_path:
         config_path = os.path.abspath(config_path)
 
@@ -299,7 +320,6 @@ def serve(
             ).replace(":", "")
 
     if docker:
-
         run_docker_serve(
             host,
             port,
@@ -311,7 +331,6 @@ def serve(
             image,
             config_name,
             config_path,
-            
         )
         if (
             "pytest" in sys.modules
@@ -329,6 +348,7 @@ def serve(
                 click.secho(
                     "r2r container failed to become healthy.", fg="red"
                 )
+                return
 
             traefik_port = os.environ.get("R2R_DASHBOARD_PORT", "80")
             url = f"http://localhost:{traefik_port}"
@@ -336,7 +356,7 @@ def serve(
             click.secho(f"Navigating to R2R application at {url}.", fg="blue")
             webbrowser.open(url)
     else:
-        run_local_serve(host, port, config_name, config_path)
+        await run_local_serve(host, port, config_name, config_path)
 
 
 @cli.command()

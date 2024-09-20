@@ -1,6 +1,5 @@
 """Abstractions for documents and their extractions."""
 
-import base64
 import json
 import logging
 from datetime import datetime
@@ -50,7 +49,7 @@ class DocumentType(str, Enum):
     TIFF = "tiff"
     JPG = "jpg"
     SVG = "svg"
-    
+
     # Markdown
     MD = "md"
 
@@ -91,9 +90,10 @@ class DocumentType(str, Enum):
     # XML
     XML = "xml"
 
+
 class Document(R2RSerializable):
     id: UUID = Field(default_factory=uuid4)
-    group_ids: list[UUID]
+    collection_ids: list[UUID]
     user_id: UUID
     type: DocumentType
     metadata: dict
@@ -110,6 +110,7 @@ class IngestionStatus(str, Enum):
 
     PENDING = "pending"
     PARSING = "parsing"
+    EXTRACTING = "extracting"
     CHUNKING = "chunking"
     EMBEDDING = "embedding"
     STORING = "storing"
@@ -134,7 +135,7 @@ class DocumentInfo(R2RSerializable):
     """Base class for document information handling."""
 
     id: UUID
-    group_ids: list[UUID]
+    collection_ids: list[UUID]
     user_id: UUID
     type: DocumentType
     metadata: dict
@@ -145,6 +146,7 @@ class DocumentInfo(R2RSerializable):
     restructuring_status: RestructureStatus = RestructureStatus.PENDING
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    ingestion_attempt_number: Optional[int] = None
 
     def convert_to_db_entry(self):
         """Prepare the document info for database entry, extracting certain fields from metadata."""
@@ -152,7 +154,7 @@ class DocumentInfo(R2RSerializable):
 
         return {
             "document_id": self.id,
-            "group_ids": self.group_ids,
+            "collection_ids": self.collection_ids,
             "user_id": self.user_id,
             "type": self.type,
             "metadata": json.dumps(self.metadata),
@@ -163,6 +165,7 @@ class DocumentInfo(R2RSerializable):
             "restructuring_status": self.restructuring_status,
             "created_at": self.created_at or now,
             "updated_at": self.updated_at or now,
+            "ingestion_attempt_number": self.ingestion_attempt_number or 0,
         }
 
 
@@ -171,7 +174,7 @@ class DocumentExtraction(R2RSerializable):
 
     id: UUID
     document_id: UUID
-    group_ids: list[UUID]
+    collection_ids: list[UUID]
     user_id: UUID
     data: DataType
     metadata: dict
@@ -184,6 +187,6 @@ class DocumentFragment(R2RSerializable):
     extraction_id: UUID
     document_id: UUID
     user_id: UUID
-    group_ids: list[UUID]
+    collection_ids: list[UUID]
     data: DataType
     metadata: dict
